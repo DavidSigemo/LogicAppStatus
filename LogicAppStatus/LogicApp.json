@@ -80,22 +80,6 @@
         "definition": {
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
           "actions": {
-            "Get_my_profile": {
-              "type": "ApiConnection",
-              "inputs": {
-                "host": {
-                  "api": {
-                    "runtimeUrl": "https://logic-apis-northeurope.azure-apim.net/apim/office365users"
-                  },
-                  "connection": {
-                    "name": "@parameters('$connections')['office365users']['connectionId']"
-                  }
-                },
-                "method": "get",
-                "path": "/users/me"
-              },
-              "runAfter": {}
-            },
             "Switch": {
               "type": "Switch",
               "expression": "@triggerBody()?['Status']?['Value']",
@@ -103,8 +87,8 @@
                 "Case": {
                   "case": "2 Förslag klart 14/4",
                   "actions": {
-                    "Send_an_email": {
-                      "type": "ApiConnection",
+                    "Send_approval_email": {
+                      "type": "ApiConnectionWebhook",
                       "inputs": {
                         "host": {
                           "api": {
@@ -114,15 +98,52 @@
                             "name": "@parameters('$connections')['office365']['connectionId']"
                           }
                         },
-                        "method": "post",
-                        "path": "/Mail",
+                        "path": "/approvalmail/$subscriptions",
                         "body": {
-                          "To": null,
-                          "Subject": null,
-                          "Body": null
+                          "NotificationUrl": "@listCallbackUrl()",
+                          "Message": {
+                            "To": "@{triggerBody()?['AdministrativeOfficer']?['Email']}",
+                            "Subject": "Approval Request",
+                            "Options": "Approve, Reject",
+                            "Body": "<div><h1>Hej @{triggerBody()?['AdministrativeOfficer']?['DisplayName']}</h1><br><div><p>Ärendet @{triggerBody()?['Title']} har uppdaterats och behöver ditt godkännande.</p><p>Var god läs igenom <a href=\"https://blargh.sharepoint.com/sites/motionshanteringexjobb/Motionshantering/yttranden/DispForm.aspx?ID=@{triggerBody()?['ID']}\">följande ärende</a> och godkänn med hjälp av knappar nedan</p>    </div></div>",
+                            "Importance": "Normal"
+                          }
                         }
                       },
                       "runAfter": {}
+                    },
+                    "Condition": {
+                      "type": "If",
+                      "expression": "@equals(body('Send_approval_email'), 'Approve')",
+                      "actions": {
+                        "Update_item": {
+                          "type": "ApiConnection",
+                          "inputs": {
+                            "host": {
+                              "api": {
+                                "runtimeUrl": "https://logic-apis-northeurope.azure-apim.net/apim/sharepointonline"
+                              },
+                              "connection": {
+                                "name": "@parameters('$connections')['sharepointonline']['connectionId']"
+                              }
+                            },
+                            "method": "patch",
+                            "path": "/datasets/@{encodeURIComponent(encodeURIComponent('https://blargh.sharepoint.com/sites/motionshanteringexjobb/Motionshantering'))}/tables/@{encodeURIComponent(encodeURIComponent('41c55412-3399-4fdd-b331-d09b46a34896'))}/items/@{encodeURIComponent(triggerBody()?['ID'])}",
+                            "body": {
+                              "Title": "@{triggerBody()?['Title']} - UPPDATERAD",
+                              "OrderNumberLgr": "@triggerBody()?['OrderNumberLgr']",
+                              "OrderNumberBoard": "@triggerBody()?['OrderNumberBoard']",
+                              "OrderNumberBook": "@triggerBody()?['OrderNumberBook']"
+                            }
+                          },
+                          "runAfter": {}
+                        }
+                      },
+                      "runAfter": {
+                        "Send_approval_email": [
+                          "Succeeded"
+                        ]
+                      }
                     }
                   }
                 }
@@ -130,11 +151,7 @@
               "default": {
                 "actions": {}
               },
-              "runAfter": {
-                "Get_my_profile": [
-                  "Succeeded"
-                ]
-              }
+              "runAfter": {}
             }
           },
           "parameters": {
@@ -171,29 +188,23 @@
         "parameters": {
           "$connections": {
             "value": {
-              "sharepointonline": {
-                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'sharepointonline')]",
-                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('sharepointonline_1_Connection_Name'))]",
-                "connectionName": "[parameters('sharepointonline_1_Connection_Name')]"
-              },
-              "office365users": {
-                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'office365users')]",
-                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('office365users_1_Connection_Name'))]",
-                "connectionName": "[parameters('office365users_1_Connection_Name')]"
-              },
               "office365": {
                 "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'office365')]",
                 "connectionId": "[resourceId('Microsoft.Web/connections', parameters('office365_1_Connection_Name'))]",
                 "connectionName": "[parameters('office365_1_Connection_Name')]"
+              },
+              "sharepointonline": {
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'sharepointonline')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('sharepointonline_1_Connection_Name'))]",
+                "connectionName": "[parameters('sharepointonline_1_Connection_Name')]"
               }
             }
           }
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Web/connections', parameters('sharepointonline_1_Connection_Name'))]",
-        "[resourceId('Microsoft.Web/connections', parameters('office365users_1_Connection_Name'))]",
-        "[resourceId('Microsoft.Web/connections', parameters('office365_1_Connection_Name'))]"
+        "[resourceId('Microsoft.Web/connections', parameters('office365_1_Connection_Name'))]",
+        "[resourceId('Microsoft.Web/connections', parameters('sharepointonline_1_Connection_Name'))]"
       ]
     },
     {
